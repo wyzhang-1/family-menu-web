@@ -13,7 +13,8 @@
 
   var K = {
     dishes: 'fmw_dishes', orders: 'fmw_orders', profile: 'fmw_profile',
-    family: 'fmw_family', sync: 'fmw_sync', checks: 'fmw_checks', seeded: 'fmw_seeded', mealNo: 'fmw_mealno'
+    family: 'fmw_family', sync: 'fmw_sync', checks: 'fmw_checks', seeded: 'fmw_seeded', mealNo: 'fmw_mealno',
+    members: 'fmw_members', member: 'fmw_member'
   };
 
   var CATS = [
@@ -74,6 +75,7 @@
 
   // 把家庭码钉在地址栏上：即便本地存储被清掉，刷新或收藏链接也不会变成另一个家
   function pinFamilyToUrl() {
+    if (!S.family) return;
     try {
       var u = new URL(location.href);
       if (u.searchParams.get('f') === S.family.id) return;
@@ -108,9 +110,9 @@
   // 状态
   // ============================================================
   var S = {
-    dishes: [], orders: [],
-    profile: { name: '我', emoji: '🧑' },
-    family: { id: '', name: '我们的小家', createdAt: 0 },
+    dishes: [], orders: [], members: [],
+    profile: { id: '', name: '我', emoji: '🧑' },
+    family: null,   // 不自动生成：只有点「生成家庭码」或者带 ?f= 进来才有
     checks: {},
     view: 'menu',
     cat: 'all',
@@ -127,11 +129,18 @@
   function load() {
     S.dishes = readJSON(K.dishes, []);
     S.orders = readJSON(K.orders, []);
+    S.members = readJSON(K.members, []);
     S.checks = readJSON(K.checks, {});
     var p = readJSON(K.profile, null);
     if (p) S.profile = p;
+    // 每台设备一个固定的成员 id，点菜、成员列表都靠它认人
+    if (!S.profile.id) {
+      S.profile.id = readJSON(K.member, '') || uid('mem');
+      writeJSON(K.profile, S.profile);
+    }
+    writeJSON(K.member, S.profile.id);
     var f = readJSON(K.family, null);
-    if (f) S.family = f;
+    if (f && f.id) S.family = f;
     var sc = readJSON(K.sync, null);
     if (sc) {
       SYNC.url = sc.url || '';
@@ -145,18 +154,16 @@
       SYNC.key = CFG.supabaseAnonKey;
       SYNC.on = true;
     }
-    if (!S.family.id) {
+    // 家庭码只有三种来源：地址栏 ?f=、本地存储、cookie 备份。
+    // 都没有就是「还没建家」，等用户自己点生成，绝不自动产生新码。
+    if (!S.family) {
       var ck = readCookie('fm_family');
       if (/^[A-Z0-9]{6,12}$/.test(ck)) {
         S.family = { id: ck, name: '我们的小家', createdAt: Date.now() };
         writeJSON(K.family, S.family);
       }
     }
-    if (!S.family.id) {
-      S.family = { id: newFamilyCode(), name: '我们的小家', createdAt: Date.now() };
-      writeJSON(K.family, S.family);
-    }
-    writeCookie('fm_family', S.family.id);
+    if (S.family) writeCookie('fm_family', S.family.id);
   }
 
   function saveDishes() { writeJSON(K.dishes, S.dishes); }
@@ -184,7 +191,7 @@
 
   function toRow(t, o) {
     var r = {
-      id: o.id, family_id: S.family.id, updated_at: o.updatedAt || Date.now(),
+      id: o.id, family_id: S.family ? S.family.id : '', updated_at: o.updatedAt || Date.now(),
       created_at: o.createdAt || Date.now(), deleted: !!o.deleted
     };
     if (t === 'dishes') {
@@ -192,11 +199,12 @@
       r.image = o.image || ''; r.description = o.desc || '';
       r.tags = o.tags || []; r.ingredients = o.ingredients || [];
       r.seasonings = o.seasonings || []; r.steps = o.steps || [];
-    } else {
+    } else if (t === 'orders') {
       r.dish_id = o.dishId || ''; r.name = o.name || ''; r.image = o.image || '';
       r.emoji = o.emoji || '🍽'; r.category = o.category || 'meat';
       r.qty = o.qty || 1; r.by_list = o.byList || [];
     }
+    if (t === 'members') { r.name = o.name || ''; r.emoji = o.emoji || '🧑'; }
     return r;
   }
   function fromRow(t, r) {
@@ -208,11 +216,12 @@
       o.image = r.image || ''; o.desc = r.description || '';
       o.tags = r.tags || []; o.ingredients = r.ingredients || [];
       o.seasonings = r.seasonings || []; o.steps = r.steps || [];
-    } else {
+    } else if (t === 'orders') {
       o.dishId = r.dish_id || ''; o.name = r.name || ''; o.image = r.image || '';
       o.emoji = r.emoji || '🍽'; o.category = r.category || 'meat';
       o.qty = r.qty || 1; o.byList = r.by_list || [];
     }
+    if (t === 'members') { o.name = r.name || ''; o.emoji = r.emoji || '🧑'; }
     return o;
   }
 
@@ -230,7 +239,7 @@
   }
 
   function applyRemote(table, rows) {
-    var list = table === 'dishes' ? S.dishes : S.orders;
+    var list = table === 'dishes' ? S.dishes : table === 'members' ? S.members : S.orders;
     var map = {};
     list.forEach(function (d) { map[d.id] = d; });
     var changed = false;
@@ -255,7 +264,9 @@
     });
     if (!changed) return false;
     var next = Object.keys(map).map(function (k) { return map[k]; });
-    if (table === 'dishes') { S.dishes = next; saveDishes(); } else { S.orders = next; saveOrders(); }
+    if (table === 'dishes') { S.dishes = next; saveDishes(); }
+    else if (table === 'members') { S.members = next; writeJSON(K.members, S.members); }
+    else { S.orders = next; saveOrders(); }
     return true;
   }
 
@@ -266,9 +277,10 @@
     // 回溯 5 分钟，容忍两台设备时钟不一致；applyRemote 按 updated_at 比较，重复拉取是安全的
     var since = water > CLOCK_SKEW ? water - CLOCK_SKEW : 0;
     var hi = water;
+    if (!S.family || !S.family.id) return Promise.resolve();
     var fidRaw = S.family.id;
     var fid = encodeURIComponent(fidRaw);
-    var tables = ['dishes', 'orders'];
+    var tables = ['dishes', 'orders', 'members'];
     var changed = false;
     return tables.reduce(function (p, t) {
       return p.then(function () {
@@ -287,7 +299,7 @@
     }, Promise.resolve()).then(function () {
       SYNC.busy = false;
       // 拉取途中换了家庭码：这次结果作废，按新家全量重来（否则老时间戳会把新家的旧数据过滤掉）
-      if (S.family.id !== fidRaw) { setTimeout(pull, 200); return; }
+      if (!S.family || S.family.id !== fidRaw) { setTimeout(pull, 200); return; }
       SYNC.lastPull = Math.max(water, hi);
       saveSync();
       markSync(true);
@@ -300,7 +312,7 @@
   }
 
   function pushRows(table, objs) {
-    if (!SYNC.on || !objs.length) return Promise.resolve();
+    if (!SYNC.on || !objs.length || !S.family) return Promise.resolve();
     var body = objs.map(function (o) { return toRow(table, o); });
     return fetch(SYNC.url + '/rest/v1/' + table, {
       method: 'POST',
@@ -433,7 +445,7 @@
       upsertOrder({
         id: uid('order'), dishId: dish.id, name: dish.name, image: dish.image || '',
         emoji: dish.emoji || '🍽', category: dish.category, qty: 1,
-        byList: [{ name: S.profile.name, emoji: S.profile.emoji }],
+        byList: [{ id: S.profile.id, name: S.profile.name, emoji: S.profile.emoji }],
         createdAt: now, updatedAt: now, deleted: false
       });
     }
@@ -551,7 +563,7 @@
       '<div class="hero-top"><div>' +
       '<p class="brand">咕噜咕噜研究院</p>' +
       '<h1 class="hi">' + g[0] + ' <span>' + g[1] + '</span></h1>' +
-      '<p class="sub">' + esc(S.family.name || '我们的小家') + ' · 今天想吃点什么？</p>' +
+      '<p class="sub">' + esc(S.family ? S.family.name : '我们的小家') + ' · 今天想吃点什么？</p>' +
       '</div><button class="avatar press" data-act="go" data-page="profile">' + esc(S.profile.emoji) + '</button></div>' +
       '<div class="search"><span class="ic">🔍</span>' +
       '<input id="qInput" placeholder="搜索菜名、配菜或佐料" value="' + esc(S.q) + '"' +
@@ -791,21 +803,46 @@
   function viewProfile() {
     var dishCount = aliveDishes().length;
     var orderCount = aliveOrders().length;
+    var fam = S.family;
+    var members = aliveMembers();
+    var famCard;
+    if (!fam) {
+      famCard = '<div class="pcard"><h3>👫 我们的小家</h3>' +
+        '<p class="ph2">还没有家庭码。生成一个，另一半用它能进同一个家，菜谱和点菜实时互通。</p>' +
+        '<button class="btn-primary press" data-act="genCode">✨ 生成家庭码</button>' +
+        '<button class="btn-ghost press" data-act="openJoin">🔑 已有对方的码，加入她/他的家</button>' +
+        '</div>';
+    } else {
+      var memRows = members.map(function (m) {
+        var me = m.id === S.profile.id;
+        return '<div class="mem"><span class="ma">' + esc(m.emoji || '🧑') + '</span>' +
+          '<span class="mn">' + esc(m.name || '家人') + '</span>' +
+          (me ? '<span class="mtag">本机</span>'
+              : '<button class="mrm press" data-act="delMember" data-id="' + esc(m.id) + '">移出</button>') +
+          '</div>';
+      }).join('');
+      if (!memRows) memRows = '<p class="ph3">成员还在同步中，稍等一下。</p>';
+      famCard = '<div class="pcard"><h3>👫 我们的小家</h3><p class="ph2">把这个码给另一半，或者直接把链接发给她/他</p>' +
+        '<div class="codebox"><span class="cd">' + esc(fam.id) + '</span>' +
+        '<button data-act="copyCode">复制码</button></div>' +
+        '<button class="btn-ghost press" style="margin-top:0" data-act="shareLink">🔗 复制邀请链接</button>' +
+        '<button class="btn-ghost press" style="margin-top:8px" data-act="openJoin">🔑 加入别的家</button>' +
+        '<div class="memhead"><b>成员</b><span>' + members.length + ' 人</span></div>' +
+        '<div class="memlist">' + memRows + '</div>' +
+        '<button class="linkrow press" style="margin-top:14px" data-act="regenCode"><span class="li">♻️</span>' +
+        '<span class="lb"><b>重新生成家庭码</b><span>换一个新码，旧码就不再同步新数据</span></span><span class="ar">›</span></button>' +
+        '<p class="ph3">提示：地址栏里的链接已经带着这个码，收藏它，换设备打开也是同一个家。</p>' +
+        '</div>';
+    }
     return '<div class="phero"><div class="av">' + esc(S.profile.emoji) + '</div>' +
       '<p class="nm">' + esc(S.profile.name) + '</p>' +
-      '<p class="fm">' + esc(S.family.name) + ' · ' + dishCount + ' 道菜</p>' +
+      '<p class="fm">' + esc(S.family ? S.family.name : '还没有建家') + ' · ' + dishCount + ' 道菜</p>' +
       '<span class="mode ' + (SYNC.on ? '' : 'off') + '">' + (SYNC.on ? '☁️ 已开启两人同步' : '📱 仅本机使用') + '</span></div>' +
 
-      (S.storageBroken ? '<div class="warn">⚠️ 这个浏览器禁止了本地存储（无痕模式或隐私设置），菜和家庭码刷新后会丢。请换普通窗口打开，或把地址栏里带 <b>?f=' + esc(S.family.id) + '</b> 的链接收藏起来。</div>' : '') +
-      '<div class="pcard"><h3>👫 我们的小家</h3><p class="ph2">把这个码给另一半，或者直接把链接发给她/他</p>' +
-      '<div class="codebox"><span class="cd">' + esc(S.family.id) + '</span>' +
-      '<button data-act="copyCode">复制码</button></div>' +
-      '<button class="btn-ghost press" style="margin-top:0" data-act="shareLink">🔗 复制邀请链接</button>' +
-      '<button class="btn-ghost press" style="margin-top:8px" data-act="openJoin">🔑 已有对方的家庭码，加入她/他的家</button>' +
-      '<p class="ph3">提示：地址栏里的链接已经带着这个码，收藏它，换设备打开也是同一个家。</p>' +
-      '</div>' +
+      (S.storageBroken ? '<div class="warn">⚠️ 这个浏览器禁止了本地存储（无痕模式或隐私设置），菜和家庭码刷新后会丢。请换普通窗口打开，或把地址栏里带 <b>?f=' + esc(S.family ? S.family.id : '') + '</b> 的链接收藏起来。</div>' : '') +
+      famCard +
 
-      '<div class="pcard"><h3>☁️ 云端同步</h3>' +
+            '<div class="pcard"><h3>☁️ 云端同步</h3>' +
       '<p class="ph2">' + (SYNC.on ? '状态：<b id="syncState">已连接</b> · 每 5 秒自动同步' :
         '状态：<b id="syncState">未开启</b> · 现在只存在这台设备上') + '</p>' +
       '<button class="linkrow press" data-act="openSync"><span class="li">⚙️</span>' +
@@ -837,6 +874,59 @@
       '<p style="text-align:center;font-size:11.5px;color:#C9B8A6;padding:10px 0 24px">咕噜咕噜研究院 · 两个人一起吃好每一顿</p>';
   }
 
+  // ---------- 家庭成员 ----------
+  function aliveMembers() {
+    return S.members.filter(function (m) { return !m.deleted; });
+  }
+  function myMemberRecord() {
+    var hit = null;
+    S.members.forEach(function (m) { if (m.id === S.profile.id) hit = m; });
+    return hit;
+  }
+  // 把自己登记成这个家的成员（建家、加入、改名、换头像时调用）
+  function registerSelf(push) {
+    if (!S.family || !S.family.id) return null;
+    var now = Date.now();
+    var rec = myMemberRecord();
+    if (!rec) {
+      rec = { id: S.profile.id, name: S.profile.name, emoji: S.profile.emoji,
+        createdAt: now, updatedAt: now, deleted: false };
+      S.members.push(rec);
+    } else {
+      rec.name = S.profile.name;
+      rec.emoji = S.profile.emoji;
+      rec.deleted = false;
+      rec.updatedAt = now;
+    }
+    writeJSON(K.members, S.members);
+    if (push) pushRows('members', [rec]);
+    return rec;
+  }
+
+  // 建家 / 换家：本地菜谱留着，进度清零后重新拉一遍再推
+  function startFamily(code) {
+    S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
+    writeJSON(K.family, S.family);
+    writeCookie('fm_family', code);
+    pinFamilyToUrl();
+    SYNC.lastPull = 0;
+    saveSync();
+    registerSelf(false);
+    render();
+    if (!SYNC.on) { toast('已生成家庭码 ' + code); return; }
+    toast('正在同步到这个家…');
+    pullIdle().then(function () {
+      registerSelf(true);
+      return pushRows('dishes', S.dishes);
+    }).then(function () {
+      return pushRows('orders', S.orders);
+    }).then(function () {
+      toast('已连上 ' + code);
+      render();
+    });
+    startPolling();
+  }
+
   // 加入对方家庭（手动输码）
   function joinSheet() {
     sheet(
@@ -860,25 +950,9 @@
     var el = document.getElementById('joinCode');
     var code = ((el && el.value) || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length < 6) { toast('家庭码是 8 位字母和数字，再看看'); return; }
-    if (code === S.family.id) { toast('已经在这个家里了'); closeSheet(); return; }
-    S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
-    writeJSON(K.family, S.family);
-    writeCookie('fm_family', code);
-    SYNC.lastPull = 0;          // 换家后必须全量拉，否则老数据会被时间戳过滤掉
-    saveSync();
+    if (S.family && code === S.family.id) { toast('已经在这个家里了'); closeSheet(); return; }
     closeSheet();
-    toast('已加入 ' + code + '，正在同步…');
-    render();
-    if (!SYNC.on) { toast('已切到 ' + code + '（当前是本机模式）'); return; }
-    // 先拉对方的菜单（按名字合并掉自己的示例菜），再把本地独有的菜推上去
-    pullIdle().then(function () {
-      return pushRows('dishes', S.dishes);
-    }).then(function () {
-      return pushRows('orders', S.orders);
-    }).then(function () {
-      setTimeout(pullIdle, 300);
-    });
-    startPolling();
+    startFamily(code);
   }
 
   // ============================================================
@@ -1688,7 +1762,7 @@
       case 'random': closeSheet(); randomDish(); break;
       case 'setCat': captureForm(); S.editing.category = t.getAttribute('data-cat'); render(); break;
       case 'setEmoji': captureForm(); S.editing.emoji = t.getAttribute('data-em'); render(); break;
-      case 'setAvatar': captureForm(); S.profile.emoji = t.getAttribute('data-em'); writeJSON(K.profile, S.profile); render(); break;
+      case 'setAvatar': captureForm(); S.profile.emoji = t.getAttribute('data-em'); writeJSON(K.profile, S.profile); registerSelf(true); render(); break;
       case 'clearImage': ev.preventDefault(); ev.stopPropagation(); S.editing.image = ''; $('#coverArea').innerHTML = coverInner(); break;
       case 'addRow': {
         var kind = t.getAttribute('data-kind');
@@ -1754,10 +1828,36 @@
       }
       case 'saveMeal': saveMeal(); break;
       case 'shareMeal': shareMeal(); break;
-      case 'copyCode': copyText(S.family.id, '家庭码已复制'); break;
+      case 'genCode': {
+        if (S.family) { toast('已经有家庭码了'); break; }
+        startFamily(newFamilyCode());
+        break;
+      }
+      case 'regenCode': {
+        if (!confirm('重新生成后，旧的码就不再同步新数据（旧数据还留在云端），确定吗？')) break;
+        startFamily(newFamilyCode());
+        toast('新的家庭码已生成');
+        break;
+      }
+      case 'delMember': {
+        var mid = t.getAttribute('data-id');
+        var mm = null;
+        S.members.forEach(function (x) { if (x.id === mid) mm = x; });
+        if (!mm) break;
+        if (!confirm('把「' + (mm.name || '家人') + '」移出这个家？他/她的设备将看不到这里的菜。')) break;
+        mm.deleted = true;
+        mm.updatedAt = Date.now();
+        writeJSON(K.members, S.members);
+        pushRows('members', [mm]);
+        toast('已移出');
+        render();
+        break;
+      }
+      case 'copyCode': if (S.family) copyText(S.family.id, '家庭码已复制'); break;
       case 'openJoin': joinSheet(); break;
       case 'doJoin': doJoin(); break;
       case 'shareLink': {
+        if (!S.family) { toast('先建一个家'); break; }
         var link = location.origin + location.pathname + '?f=' + S.family.id;
         copyText(link, '邀请链接已复制，发给另一半吧');
         break;
@@ -1823,6 +1923,7 @@
     } else if (id === 'pName') {
       S.profile.name = ev.target.value.trim() || '我';
       writeJSON(K.profile, S.profile);
+      registerSelf(true);
       var nm = $('.phero .nm');
       if (nm) nm.textContent = S.profile.name;
     }
@@ -1838,7 +1939,7 @@
     var m = /[?&]f=([A-Z0-9]{6,12})/i.exec(location.search);
     if (m) {
       var code = m[1].toUpperCase();
-      if (code !== S.family.id) {
+      if (!S.family || code !== S.family.id) {
         S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
         writeJSON(K.family, S.family);
         writeCookie('fm_family', code);
@@ -1847,10 +1948,11 @@
         toast('已加入小家 ' + code);
       }
     }
+    if (S.family) registerSelf(false);
     pinFamilyToUrl();
 
     render();
-    if (SYNC.on) {
+    if (SYNC.on && S.family) {
       if (!SYNC.lastPull) {
         // 先拉再推：云端已有的菜先按名字合并到本地（本地 id 会让位给云端 id），
         // 这样推上去的只有真正新增的，不会在云端留下两套同名的示例菜
@@ -1858,6 +1960,8 @@
           return pushRows('dishes', S.dishes);
         }).then(function () {
           return pushRows('orders', S.orders);
+        }).then(function () {
+          return pushRows('members', S.members);
         });
       } else {
         pull();
