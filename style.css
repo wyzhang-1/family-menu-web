@@ -281,3 +281,15 @@ input,textarea,select{font:inherit;color:inherit;border:0;outline:0;background:n
   font-size:11px;padding:5px 12px;border-radius:999px;background:rgba(45,28,18,.82);color:#fff;opacity:0;transition:.25s;pointer-events:none}
 .sync.on{opacity:1}
 .hidden{display:none!important}
+
+
+/* ---------- 家庭成员 ---------- */
+.memhead{display:flex;align-items:baseline;justify-content:space-between;margin:18px 2px 8px}
+.memhead b{font-size:13px;color:var(--ink-2);font-weight:800}
+.memhead span{font-size:12px;color:var(--ink-3)}
+.memlist{display:flex;flex-direction:column;gap:8px}
+.mem{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:14px;background:#FFF8F2;border:1px solid #F6E7D9}
+.ma{width:32px;height:32px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:17px;flex:none;box-shadow:0 2px 6px rgba(180,120,70,.12)}
+.mn{flex:1;font-size:14.5px;font-weight:700;color:var(--ink)}
+.mtag{font-size:11px;font-weight:700;color:var(--brand);background:#FFEDE2;border-radius:8px;padding:3px 8px}
+.mrm{font-size:12px;font-weight:700;color:#B98080;background:#fff;border-radius:9px;padding:5px 10px;box-shadow:0 2px 6px rgba(180,120,70,.12)}
