@@ -48,6 +48,39 @@
   function writeJSON(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { toast('本地存储已满，请清理一些图片'); }
   }
+  // 浏览器可能禁用/清空本地存储（无痕模式、微信内置浏览器、隐私设置）。
+  // 这种情况下每次刷新都会重新生成家庭码，数据也存不住，要明确告诉用户。
+  function storageOK() {
+    try {
+      var k = '__fm_probe__';
+      localStorage.setItem(k, '1');
+      var ok = localStorage.getItem(k) === '1';
+      localStorage.removeItem(k);
+      return ok;
+    } catch (e) { return false; }
+  }
+  // cookie 备份：有些浏览器（无痕、微信内置）会清 localStorage，cookie 通常还在
+  function readCookie(k) {
+    try {
+      var m = document.cookie.match(new RegExp('(?:^|; )' + k + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    } catch (e) { return ''; }
+  }
+  function writeCookie(k, v) {
+    try {
+      document.cookie = k + '=' + encodeURIComponent(v) + '; path=/; max-age=31536000; SameSite=Lax';
+    } catch (e) {}
+  }
+
+  // 把家庭码钉在地址栏上：即便本地存储被清掉，刷新或收藏链接也不会变成另一个家
+  function pinFamilyToUrl() {
+    try {
+      var u = new URL(location.href);
+      if (u.searchParams.get('f') === S.family.id) return;
+      u.searchParams.set('f', S.family.id);
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch (e) {}
+  }
   function todayStr() {
     var d = new Date();
     return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
@@ -113,9 +146,17 @@
       SYNC.on = true;
     }
     if (!S.family.id) {
+      var ck = readCookie('fm_family');
+      if (/^[A-Z0-9]{6,12}$/.test(ck)) {
+        S.family = { id: ck, name: '我们的小家', createdAt: Date.now() };
+        writeJSON(K.family, S.family);
+      }
+    }
+    if (!S.family.id) {
       S.family = { id: newFamilyCode(), name: '我们的小家', createdAt: Date.now() };
       writeJSON(K.family, S.family);
     }
+    writeCookie('fm_family', S.family.id);
   }
 
   function saveDishes() { writeJSON(K.dishes, S.dishes); }
@@ -755,11 +796,13 @@
       '<p class="fm">' + esc(S.family.name) + ' · ' + dishCount + ' 道菜</p>' +
       '<span class="mode ' + (SYNC.on ? '' : 'off') + '">' + (SYNC.on ? '☁️ 已开启两人同步' : '📱 仅本机使用') + '</span></div>' +
 
+      (S.storageBroken ? '<div class="warn">⚠️ 这个浏览器禁止了本地存储（无痕模式或隐私设置），菜和家庭码刷新后会丢。请换普通窗口打开，或把地址栏里带 <b>?f=' + esc(S.family.id) + '</b> 的链接收藏起来。</div>' : '') +
       '<div class="pcard"><h3>👫 我们的小家</h3><p class="ph2">把这个码给另一半，或者直接把链接发给她/他</p>' +
       '<div class="codebox"><span class="cd">' + esc(S.family.id) + '</span>' +
       '<button data-act="copyCode">复制码</button></div>' +
       '<button class="btn-ghost press" style="margin-top:0" data-act="shareLink">🔗 复制邀请链接</button>' +
       '<button class="btn-ghost press" style="margin-top:8px" data-act="openJoin">🔑 已有对方的家庭码，加入她/他的家</button>' +
+      '<p class="ph3">提示：地址栏里的链接已经带着这个码，收藏它，换设备打开也是同一个家。</p>' +
       '</div>' +
 
       '<div class="pcard"><h3>☁️ 云端同步</h3>' +
@@ -820,6 +863,7 @@
     if (code === S.family.id) { toast('已经在这个家里了'); closeSheet(); return; }
     S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
     writeJSON(K.family, S.family);
+    writeCookie('fm_family', code);
     SYNC.lastPull = 0;          // 换家后必须全量拉，否则老数据会被时间戳过滤掉
     saveSync();
     closeSheet();
@@ -1786,6 +1830,7 @@
 
   // 路由 / 启动
   function boot() {
+    S.storageBroken = !storageOK();
     load();
     seedIfEmpty();
 
@@ -1796,11 +1841,13 @@
       if (code !== S.family.id) {
         S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
         writeJSON(K.family, S.family);
+        writeCookie('fm_family', code);
         SYNC.lastPull = 0;      // 换家后全量拉，否则新家的老数据拉不到
         saveSync();
         toast('已加入小家 ' + code);
       }
     }
+    pinFamilyToUrl();
 
     render();
     if (SYNC.on) {
