@@ -1,4 +1,4 @@
--- 家的菜单 · Supabase 建表脚本
+-- 咕噜咕噜研究院 · Supabase 建表脚本
 -- 用法：Supabase 控制台 → 左侧 SQL Editor → New query → 粘贴全部 → Run
 
 create table if not exists public.dishes (
