@@ -14,7 +14,7 @@
   var K = {
     dishes: 'fmw_dishes', orders: 'fmw_orders', profile: 'fmw_profile',
     family: 'fmw_family', sync: 'fmw_sync', checks: 'fmw_checks', seeded: 'fmw_seeded', mealNo: 'fmw_mealno',
-    members: 'fmw_members', member: 'fmw_member'
+    members: 'fmw_members', member: 'fmw_member', kicked: 'fmw_kicked'
   };
 
   var CATS = [
@@ -164,6 +164,28 @@
       }
     }
     if (S.family) writeCookie('fm_family', S.family.id);
+    markLegacySeeds();
+  }
+
+  // 老版本写入的示例菜没有 seeded 标记：内容与内置示例完全一致才补上，
+  // 用户改过任何配菜/佐料就不再算示例菜，避免把真实菜误判成示例而不同步
+  function sameList(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (var i = 0; i < b.length; i++) {
+      if ((a[i].name || '') !== (b[i].name || '') || (a[i].amount || '') !== (b[i].amount || '')) return false;
+    }
+    return true;
+  }
+  function markLegacySeeds() {
+    var demo = seededDemo(), dirty = false;
+    S.dishes.forEach(function (d) {
+      if (d.seeded !== undefined) return;
+      for (var i = 0; i < demo.length; i++) {
+        if (demo[i].name === d.name && sameList(d.ingredients, demo[i].ingredients) &&
+            sameList(d.seasonings, demo[i].seasonings)) { d.seeded = true; dirty = true; break; }
+      }
+    });
+    if (dirty) saveDishes();
   }
 
   function saveDishes() { writeJSON(K.dishes, S.dishes); }
@@ -253,9 +275,13 @@
           if (k !== o.id && (map[k].name || '').trim() === (o.name || '').trim()) { dupKey = k; dupObj = map[k]; }
         });
         if (dupKey) {
-          var newer = (dupObj.updatedAt || 0) > (o.updatedAt || 0) ? dupObj : o;
+          // 示例菜永远让位给真实菜；都不是示例时才比更新时间
+          var pick;
+          if (dupObj.seeded && !o.seeded) pick = o;
+          else if (o.seeded && !dupObj.seeded) pick = dupObj;
+          else pick = (dupObj.updatedAt || 0) > (o.updatedAt || 0) ? dupObj : o;
           delete map[dupKey];
-          map[o.id] = Object.assign({}, newer, { id: o.id });
+          map[o.id] = Object.assign({}, pick, { id: o.id });
           changed = true;
           return;
         }
@@ -265,7 +291,13 @@
     if (!changed) return false;
     var next = Object.keys(map).map(function (k) { return map[k]; });
     if (table === 'dishes') { S.dishes = next; saveDishes(); }
-    else if (table === 'members') { S.members = next; writeJSON(K.members, S.members); }
+    else if (table === 'members') {
+      S.members = next;
+      writeJSON(K.members, S.members);
+      // 自己被人移出：标记一下，由 pull 收尾时统一处理（这里不方便弹窗/改路由）
+      var mine = myMemberRecord();
+      if (mine && mine.deleted && !S.joining) S.kicked = true;
+    }
     else { S.orders = next; saveOrders(); }
     return true;
   }
@@ -300,6 +332,7 @@
       SYNC.busy = false;
       // 拉取途中换了家庭码：这次结果作废，按新家全量重来（否则老时间戳会把新家的旧数据过滤掉）
       if (!S.family || S.family.id !== fidRaw) { setTimeout(pull, 200); return; }
+      if (S.kicked) { kickSelf(); return; }
       SYNC.lastPull = Math.max(water, hi);
       saveSync();
       markSync(true);
@@ -313,6 +346,9 @@
 
   function pushRows(table, objs) {
     if (!SYNC.on || !objs.length || !S.family) return Promise.resolve();
+    // 内置示例菜只是本地开场用，不推到云端，避免覆盖对方真实编辑过的同名菜
+    if (table === 'dishes') objs = objs.filter(function (d) { return !d.seeded; });
+    if (!objs.length) return Promise.resolve();
     var body = objs.map(function (o) { return toRow(table, o); });
     return fetch(SYNC.url + '/rest/v1/' + table, {
       method: 'POST',
@@ -361,36 +397,45 @@
   // ============================================================
   // 示例菜品
   // ============================================================
-  function seedIfEmpty() {
-    if (readJSON(K.seeded, false)) return;
-    if (S.dishes.length) { writeJSON(K.seeded, true); return; }
-    var now = Date.now();
-    var demo = [
+  // 内置示例菜：只在全新设备上开场用，带 seeded 标记，绝不覆盖/推送真实菜
+  function seededDemo() {
+    return [
       {
+        seeded: true,
         name: '番茄炒蛋', category: 'meat', emoji: '🍅', desc: '酸甜下饭，十分钟搞定的国民菜',
         tags: ['快手', '家常'], ingredients: [{ name: '番茄', amount: '2 个' }, { name: '鸡蛋', amount: '3 个' }],
         seasonings: [{ name: '盐', amount: '适量' }, { name: '糖', amount: '1 小勺' }, { name: '葱花', amount: '少许' }],
         steps: ['番茄切块，鸡蛋打散加少许盐', '热锅热油，倒入蛋液炒至凝固盛出', '下番茄炒出汁，加糖和盐', '倒回鸡蛋翻炒均匀，撒葱花出锅']
       },
       {
+        seeded: true,
         name: '可乐鸡翅', category: 'meat', emoji: '🍗', desc: '一罐可乐焖出来的甜咸软糯',
         tags: ['下饭', '有面子'], ingredients: [{ name: '鸡翅中', amount: '8 个' }, { name: '可乐', amount: '1 罐' }],
         seasonings: [{ name: '生抽', amount: '2 勺' }, { name: '姜片', amount: '3 片' }, { name: '料酒', amount: '1 勺' }],
         steps: ['鸡翅划两刀，冷水下锅焯水去腥', '少油煎至两面金黄', '倒入可乐、生抽、姜片、料酒', '小火焖 15 分钟，大火收汁']
       },
       {
+        seeded: true,
         name: '蒜蓉西兰花', category: 'veg', emoji: '🥦', desc: '清爽解腻，颜色也好看',
         tags: ['清淡', '快手'], ingredients: [{ name: '西兰花', amount: '1 颗' }, { name: '蒜', amount: '4 瓣' }],
         seasonings: [{ name: '盐', amount: '适量' }, { name: '蚝油', amount: '1 勺' }],
         steps: ['西兰花掰小朵，盐水泡 10 分钟', '沸水焯 1 分钟捞出过凉', '蒜末爆香，下西兰花翻炒', '加蚝油和盐，翻匀出锅']
       },
       {
+        seeded: true,
         name: '紫菜蛋花汤', category: 'soup', emoji: '🍲', desc: '五分钟的一碗热汤',
         tags: ['快手', '清淡'], ingredients: [{ name: '紫菜', amount: '1 小把' }, { name: '鸡蛋', amount: '1 个' }],
         seasonings: [{ name: '盐', amount: '适量' }, { name: '香油', amount: '几滴' }, { name: '葱花', amount: '少许' }],
         steps: ['水烧开，放入撕碎的紫菜', '淋入打散的蛋液，画圈搅出蛋花', '加盐调味，关火滴香油撒葱花']
       }
     ];
+  }
+
+  function seedIfEmpty() {
+    if (readJSON(K.seeded, false)) return;
+    if (S.dishes.length) { writeJSON(K.seeded, true); return; }
+    var now = Date.now();
+    var demo = seededDemo();
     S.dishes = demo.map(function (d, i) {
       return Object.assign({
         id: uid('dish'), image: '', createdAt: now - i * 1000, updatedAt: now - i * 1000, deleted: false
@@ -888,9 +933,19 @@
     if (!S.family || !S.family.id) return null;
     var now = Date.now();
     var rec = myMemberRecord();
-    // 被家里人移出后不要再自动复活，否则「移出」永远清不掉
+    // 被家里人移出后不要自动复活，否则「移出」永远清不掉；
+    // 只有本人主动输码加入（S.joining）时才允许回来
     if (rec && rec.deleted) {
-      if (push) toast('你已被移出这个家，想回来请让对方重新给你家庭码');
+      if (S.joining) {
+        rec.deleted = false;
+        rec.name = S.profile.name;
+        rec.emoji = S.profile.emoji;
+        rec.updatedAt = now;
+        writeJSON(K.members, S.members);
+        if (push) pushRows('members', [rec]);
+        return rec;
+      }
+      if (push) toast('你已被移出这个家，想回来请让对方把新的家庭码给你');
       return null;
     }
     if (!rec) {
@@ -908,8 +963,34 @@
     return rec;
   }
 
+  // 被家人移出：干净地退回「还没有家」，停止同步，本地菜谱保留
+  function kickSelf() {
+    S.kicked = false;
+    if (!S.family) return;
+    var kickedFrom = S.family.id;
+    S.family = null;
+    S.members = [];
+    S.joining = false;
+    writeJSON(K.kicked, kickedFrom);    // 记住被哪个家移出，收藏的旧链接不会静默复活
+    writeJSON(K.members, []);
+    try { localStorage.removeItem(K.family); } catch (e) {}
+    writeCookie('fm_family', '');
+    if (SYNC.timer) { clearInterval(SYNC.timer); SYNC.timer = null; }
+    try {
+      var u = new URL(location.href);
+      if (u.searchParams.get('f')) {
+        u.searchParams.delete('f');
+        history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+      }
+    } catch (e) {}
+    toast('你已被移出这个家，菜谱还在本机');
+    render();
+  }
+
   // 建家 / 换家：本地菜谱留着，进度清零后重新拉一遍再推
   function startFamily(code) {
+    S.joining = true;               // 本人主动建/加入，允许复活被移出的自己
+    writeJSON(K.kicked, '');
     S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
     S.members = [];                 // 换家后成员列表以新家为准
     writeJSON(K.members, S.members);
@@ -924,10 +1005,13 @@
     toast('正在同步到这个家…');
     pullIdle().then(function () {
       registerSelf(true);
+      S.joining = false;
       return pushRows('dishes', S.dishes);
     }).then(function () {
       return pushRows('orders', S.orders);
     }).then(function () {
+      S.joining = false;
+      if (S.kicked) { kickSelf(); return; }
       toast('已连上 ' + code);
       render();
     });
@@ -968,7 +1052,11 @@
   function prepData() {
     var ings = {}, seas = {};
     aliveOrders().forEach(function (o) {
+      // 菜被合并/换 id 后，订单里的 dishId 可能失效，按名字再找一次
       var d = getDish(o.dishId);
+      if (!d) {
+        S.dishes.forEach(function (x) { if (!d && !x.deleted && x.name === o.name) d = x; });
+      }
       if (!d) return;
       var n = o.qty || 1;
       (d.ingredients || []).forEach(function (it) {
@@ -1436,6 +1524,7 @@
       steps: ($('#fSteps') && $('#fSteps').value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
       createdAt: e.createdAt || now,
       updatedAt: now,
+      seeded: false,          // 用户动过手就不再是示例菜，可以同步
       deleted: false
     };
     // 图片可能刚换
@@ -1946,7 +2035,16 @@
     var m = /[?&]f=([A-Z0-9]{6,12})/i.exec(location.search);
     if (m) {
       var code = m[1].toUpperCase();
-      if (!S.family || code !== S.family.id) {
+      var kickedFrom = readJSON(K.kicked, '');
+      if (kickedFrom === code) {
+        // 曾被这个家移出：收藏链接不会自动把本人加回去，想回来要手动输码
+        try {
+          var u0 = new URL(location.href);
+          u0.searchParams.delete('f');
+          history.replaceState(null, '', u0.pathname + (u0.search || '') + u0.hash);
+        } catch (e) {}
+        setTimeout(function () { toast('你已被移出这个家，想回来请输入对方给你的家庭码'); }, 600);
+      } else if (!S.family || code !== S.family.id) {
         S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
         writeJSON(K.family, S.family);
         writeCookie('fm_family', code);
