@@ -728,7 +728,7 @@
         '状态：<b id="syncState">未开启</b> · 现在只存在这台设备上') + '</p>' +
       '<button class="linkrow press" data-act="openSync"><span class="li">⚙️</span>' +
       '<span class="lb"><b>' + (SYNC.on ? '修改同步设置' : '开启两人同步') + '</b>' +
-      '<span>需要一个免费的 Supabase 项目，2 分钟配好</span></span><span class="ar">›</span></button>' +
+      '<span>' + (SYNC.on ? '已经连上云端，可以换地址或临时关闭' : '需要一个免费的 Supabase 项目，2 分钟配好') + '</span></span><span class="ar">›</span></button>' +
       (SYNC.on ? '<button class="linkrow press" data-act="syncNow"><span class="li">🔄</span>' +
         '<span class="lb"><b>立即同步</b><span>手动拉取一次最新数据</span></span><span class="ar">›</span></button>' : '') +
       '</div>' +
