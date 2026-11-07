@@ -245,6 +245,9 @@ input,textarea,select{font:inherit;color:inherit;border:0;outline:0;background:n
 .pcard{background:#fff;border-radius:var(--r);margin:14px 16px;padding:16px;box-shadow:var(--shadow)}
 .pcard h3{font-size:13.5px;font-weight:800;margin:0 0 4px;display:flex;align-items:center;gap:6px}
 .pcard .ph2{font-size:11.5px;color:var(--ink-3);margin:0 0 12px}
+.ph3{font-size:11px;color:var(--ink-3);margin:12px 2px 0;line-height:1.6}
+.warn{margin:14px 16px 0;padding:12px 14px;border-radius:14px;background:#FFF1E6;border:1px solid #FFD9BC;
+  color:#A9502A;font-size:12px;line-height:1.65;font-weight:600}
 .linkrow{display:flex;align-items:center;gap:11px;padding:13px 0;border-bottom:1px solid #F7EFE8;font-size:14.5px;width:100%;text-align:left}
 .linkrow:last-child{border-bottom:0;padding-bottom:0}
 .linkrow .li{width:34px;height:34px;border-radius:11px;background:var(--brand-soft);display:grid;place-items:center;font-size:17px;flex:none}
