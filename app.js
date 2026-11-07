@@ -1196,6 +1196,26 @@
     toast('已导出');
   }
 
+  function normalizeDish(d) {
+    var o = {};
+    ['name', 'category', 'emoji', 'desc', 'tags', 'ingredients', 'seasonings', 'steps'].forEach(function (k) {
+      if (d[k] !== undefined) o[k] = d[k];
+    });
+    o.id = d.id || d._id || ('dish_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
+    if (d.image) o.image = d.image;
+    else if (d.img) o.image = 'data:image/' + (d.imgExt || 'jpeg') + ';base64,' + d.img;
+    o.category = CAT_MAP[o.category] ? o.category : 'meat';
+    o.emoji = o.emoji || '🍽️';
+    o.tags = Array.isArray(o.tags) ? o.tags : [];
+    o.ingredients = Array.isArray(o.ingredients) ? o.ingredients : [];
+    o.seasonings = Array.isArray(o.seasonings) ? o.seasonings : [];
+    o.steps = Array.isArray(o.steps) ? o.steps : [];
+    o.createdAt = d.createdAt || Date.now();
+    o.updatedAt = d.updatedAt || Date.now();
+    o.deleted = false;
+    return o;
+  }
+
   function importJSON() {
     var input = document.createElement('input');
     input.type = 'file';
@@ -1207,7 +1227,7 @@
       reader.onload = function () {
         try {
           var data = JSON.parse(reader.result);
-          var inc = data.dishes || [];
+          var inc = (data.dishes || []).map(normalizeDish);
           var map = {};
           S.dishes.forEach(function (d) { map[d.id] = d; });
           var add = 0, upd = 0;
