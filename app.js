@@ -192,6 +192,20 @@
     rows.forEach(function (r) {
       var o = fromRow(table, r);
       var old = map[o.id];
+      // 菜品按名字去重：两台设备各自生成的示例菜 id 不同但名字一样，不该出现两份
+      if (table === 'dishes') {
+        var dupKey = null, dupObj = null;
+        Object.keys(map).forEach(function (k) {
+          if (k !== o.id && (map[k].name || '').trim() === (o.name || '').trim()) { dupKey = k; dupObj = map[k]; }
+        });
+        if (dupKey) {
+          var newer = (dupObj.updatedAt || 0) > (o.updatedAt || 0) ? dupObj : o;
+          delete map[dupKey];
+          map[o.id] = Object.assign({}, newer, { id: o.id });
+          changed = true;
+          return;
+        }
+      }
       if (!old || (o.updatedAt || 0) > (old.updatedAt || 0)) { map[o.id] = o; changed = true; }
     });
     if (!changed) return false;
@@ -204,7 +218,8 @@
     if (!SYNC.on || SYNC.busy) return Promise.resolve();
     SYNC.busy = true;
     var since = SYNC.lastPull || 0;
-    var fid = encodeURIComponent(S.family.id);
+    var fidRaw = S.family.id;
+    var fid = encodeURIComponent(fidRaw);
     var tables = ['dishes', 'orders'];
     var changed = false;
     return tables.reduce(function (p, t) {
@@ -222,9 +237,11 @@
         });
       });
     }, Promise.resolve()).then(function () {
+      SYNC.busy = false;
+      // 拉取途中换了家庭码：这次结果作废，按新家全量重来（否则老时间戳会把新家的旧数据过滤掉）
+      if (S.family.id !== fidRaw) { setTimeout(pull, 200); return; }
       SYNC.lastPull = since;
       saveSync();
-      SYNC.busy = false;
       markSync(true);
       if (changed) { render(); }
     }).catch(function (e) {
@@ -256,6 +273,18 @@
       if (document.hidden) return;
       pull();
     }, 5000);
+  }
+
+  // 等当前那次拉取结束再拉，避免被 SYNC.busy 直接吞掉
+  function pullIdle(tries) {
+    tries = typeof tries === 'number' ? tries : 10;
+    if (SYNC.busy) {
+      if (tries > 0) {
+        return new Promise(function (res) { setTimeout(function () { res(pullIdle(tries - 1)); }, 400); });
+      }
+      return Promise.resolve();
+    }
+    return pull();
   }
 
   function testConnection() {
@@ -691,6 +720,7 @@
       '<div class="codebox"><span class="cd">' + esc(S.family.id) + '</span>' +
       '<button data-act="copyCode">复制码</button></div>' +
       '<button class="btn-ghost press" style="margin-top:0" data-act="shareLink">🔗 复制邀请链接</button>' +
+      '<button class="btn-ghost press" style="margin-top:8px" data-act="openJoin">🔑 已有对方的家庭码，加入她/他的家</button>' +
       '</div>' +
 
       '<div class="pcard"><h3>☁️ 云端同步</h3>' +
@@ -723,6 +753,49 @@
       '</div>' +
 
       '<p style="text-align:center;font-size:11.5px;color:#C9B8A6;padding:10px 0 24px">家的菜单 · 两个人一起吃好每一顿</p>';
+  }
+
+  // 加入对方家庭（手动输码）
+  function joinSheet() {
+    sheet(
+      '<div class="sh"><h2>🔑 加入对方的家</h2><button class="close" data-act="closeSheet">✕</button></div>' +
+      '<div class="sb">' +
+      '<p style="font-size:13.5px;line-height:1.7;color:#7A6857;margin:0 0 14px">' +
+      '让对方在「我的」页把 8 位家庭码发给你，填在下面。加入后你这边已有的菜会一起带过去，' +
+      '两边都不会丢。</p>' +
+      '<div class="field" style="margin:0 0 12px"><input id="joinCode" maxlength="8" ' +
+      'placeholder="比如 VFES5JKB" style="text-transform:uppercase;letter-spacing:2px;font-weight:700"></div>' +
+      '<button class="btn-primary press" data-act="doJoin">加入这个家</button>' +
+      '<p style="font-size:11.5px;text-align:center;color:#C2B2A1;margin:12px 0 0">' +
+      '家庭码相当于密码，别发到公开的群里</p>' +
+      '</div>'
+    );
+    var el = document.getElementById('joinCode');
+    if (el) setTimeout(function () { el.focus(); }, 120);
+  }
+
+  function doJoin() {
+    var el = document.getElementById('joinCode');
+    var code = ((el && el.value) || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length < 6) { toast('家庭码是 8 位字母和数字，再看看'); return; }
+    if (code === S.family.id) { toast('已经在这个家里了'); closeSheet(); return; }
+    S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
+    writeJSON(K.family, S.family);
+    SYNC.lastPull = 0;          // 换家后必须全量拉，否则老数据会被时间戳过滤掉
+    saveSync();
+    closeSheet();
+    toast('已加入 ' + code + '，正在同步…');
+    render();
+    if (!SYNC.on) { toast('已切到 ' + code + '（当前是本机模式）'); return; }
+    // 先拉对方的菜单（按名字合并掉自己的示例菜），再把本地独有的菜推上去
+    pullIdle().then(function () {
+      return pushRows('dishes', S.dishes);
+    }).then(function () {
+      return pushRows('orders', S.orders);
+    }).then(function () {
+      setTimeout(pullIdle, 300);
+    });
+    startPolling();
   }
 
   // ============================================================
@@ -1613,6 +1686,8 @@
       case 'saveMeal': saveMeal(); break;
       case 'shareMeal': shareMeal(); break;
       case 'copyCode': copyText(S.family.id, '家庭码已复制'); break;
+      case 'openJoin': joinSheet(); break;
+      case 'doJoin': doJoin(); break;
       case 'shareLink': {
         var link = location.origin + location.pathname + '?f=' + S.family.id;
         copyText(link, '邀请链接已复制，发给另一半吧');
@@ -1663,6 +1738,8 @@
       if (code !== S.family.id) {
         S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
         writeJSON(K.family, S.family);
+        SYNC.lastPull = 0;      // 换家后全量拉，否则新家的老数据拉不到
+        saveSync();
         toast('已加入小家 ' + code);
       }
     }
