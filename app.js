@@ -10,7 +10,7 @@
   var CFG = window.FAMILY_MENU_CONFIG || {};
   var K = {
     dishes: 'fmw_dishes', orders: 'fmw_orders', profile: 'fmw_profile',
-    family: 'fmw_family', sync: 'fmw_sync', checks: 'fmw_checks', seeded: 'fmw_seeded'
+    family: 'fmw_family', sync: 'fmw_sync', checks: 'fmw_checks', seeded: 'fmw_seeded', mealNo: 'fmw_mealno'
   };
 
   var CATS = [
@@ -80,7 +80,8 @@
     cat: 'all',
     q: '',
     editing: null,
-    route: { name: 'menu', param: '' }
+    route: { name: 'menu', param: '' },
+    mealNo: 0
   };
 
   var SYNC = {
@@ -394,6 +395,25 @@
     if (S.route.name === 'menu') render();
   }
 
+  function removeFromTable(dishId) {
+    var same = aliveOrders().filter(function (o) { return o.dishId === dishId; })[0];
+    if (!same) { toast('餐桌上还没有这道菜'); return; }
+    var now = Date.now();
+    if ((same.qty || 1) > 1) {
+      same.qty = (same.qty || 1) - 1;
+      same.updatedAt = now;
+      upsertOrder(same);
+      toast('已减 1 份');
+    } else {
+      same.deleted = true;
+      same.updatedAt = now;
+      upsertOrder(same);
+      toast('已从今日餐桌撤下');
+    }
+    vibrate(10);
+    if (S.route.name === 'menu') render();
+  }
+
   // ============================================================
   // 图片压缩
   // ============================================================
@@ -477,15 +497,6 @@
   // ============================================================
   function viewMenu() {
     var g = greeting();
-    var all = aliveDishes().slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
-    var list = all.filter(function (d) {
-      if (S.cat !== 'all' && d.category !== S.cat) return false;
-      if (!S.q) return true;
-      var q = S.q.toLowerCase();
-      if ((d.name || '').toLowerCase().indexOf(q) >= 0) return true;
-      var pool = [].concat(d.ingredients || [], d.seasonings || []).map(function (x) { return x.name || ''; }).join(' ');
-      return pool.toLowerCase().indexOf(q) >= 0;
-    });
     var onTableCount = aliveOrders().length;
 
     return '<div class="hero">' +
@@ -495,7 +506,10 @@
       '<p class="sub">' + esc(S.family.name || '我们的小家') + ' · 今天想吃点什么？</p>' +
       '</div><button class="avatar press" data-act="go" data-page="profile">' + esc(S.profile.emoji) + '</button></div>' +
       '<div class="search"><span class="ic">🔍</span>' +
-      '<input id="qInput" placeholder="搜索菜名、配菜或佐料" value="' + esc(S.q) + '"></div>' +
+      '<input id="qInput" placeholder="搜索菜名、配菜或佐料" value="' + esc(S.q) + '"' +
+      ' autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
+      '<span id="qClear">' + (S.q ? '<button class="sx press" data-act="clearQ" aria-label="清空搜索">✕</button>' : '') + '</span>' +
+      '</div>' +
       '</div>' +
       '<div class="quick">' +
       '<button class="qcard press" data-act="random"><div class="qb"><p class="qt">今晚吃什么</p><p class="qs">随机来一道</p></div><span class="qi">🎲</span></button>' +
@@ -506,14 +520,29 @@
         return '<button class="chip' + (S.cat === c.id ? ' on' : '') + '" data-act="cat" data-cat="' + c.id + '">' +
           (c.id === 'all' ? '🍽 全部' : c.emoji + ' ' + c.name) + '</button>';
       }).join('') + '</div>' +
-      '<div class="sec-head"><h2 class="sec-title">' + (S.cat === 'all' ? '全部菜品' : CAT_MAP[S.cat].name) +
-      '<small>' + list.length + ' 道</small></h2><span class="sec-hint">共 ' + all.length + ' 道家常味</span></div>' +
+      '<div id="menuList">' + menuListHtml() + '</div>' +
+      '<button class="fab press" data-act="newDish">＋</button>';
+  }
+
+  function menuListHtml() {
+    var all = aliveDishes().slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    var list = all.filter(function (d) {
+      if (S.cat !== 'all' && d.category !== S.cat) return false;
+      if (!S.q) return true;
+      var q = S.q.toLowerCase();
+      if ((d.name || '').toLowerCase().indexOf(q) >= 0) return true;
+      var pool = [].concat(d.ingredients || [], d.seasonings || []).map(function (x) { return x.name || ''; }).join(' ');
+      return pool.toLowerCase().indexOf(q) >= 0;
+    });
+    var hint = S.q ? '关键词「' + esc(S.q) + '」' : '共 ' + all.length + ' 道家常味';
+    return '<div class="sec-head"><h2 class="sec-title">' +
+      (S.q ? '搜索结果' : (S.cat === 'all' ? '全部菜品' : CAT_MAP[S.cat].name)) +
+      '<small>' + list.length + ' 道</small></h2><span class="sec-hint">' + hint + '</span></div>' +
       (list.length ? '<div class="grid">' + list.map(dishCard).join('') + '</div>' :
         '<div class="empty"><div class="ee">🍳</div><p class="et">' +
         (S.q ? '没搜到这道菜' : '还没有菜，先加一道吧') + '</p><p class="es">' +
-        (S.q ? '换个关键词试试' : '点右下角的 + 开始记录你家的味道') + '</p></div>') +
-      '<div style="height:20px"></div>' +
-      '<button class="fab press" data-act="newDish">＋</button>';
+        (S.q ? '换个关键词试试，或点右上角 ✕ 清空' : '点右下角的 + 开始记录你家的味道') + '</p></div>') +
+      '<div style="height:20px"></div>';
   }
 
   function dishCard(d) {
@@ -529,7 +558,10 @@
       '<p class="desc">' + esc(d.desc || '还没写介绍') + '</p>' +
       '<div class="meta"><span>🧺 ' + ((d.ingredients || []).length) + '</span>' +
       '<span>🧂 ' + ((d.seasonings || []).length) + '</span>' +
-      '<span class="add" data-act="quickAdd" data-id="' + d.id + '">＋</span></div></div></article>';
+      '<span class="stepper-mini">' +
+      '<button class="mini minus' + (on ? '' : ' off') + '" data-act="quickMinus" data-id="' + d.id + '" aria-label="减一份">－</button>' +
+      '<button class="mini add" data-act="quickAdd" data-id="' + d.id + '" aria-label="加一份">＋</button>' +
+      '</span></div></div></article>';
   }
 
   // ============================================================
@@ -667,7 +699,7 @@
     var members = Object.keys(by).map(function (k) { return by[k]; });
     var totalQty = list.reduce(function (s, o) { return s + (o.qty || 1); }, 0);
 
-    var head = '<div class="hero" style="border-radius:0 0 26px 26px;padding-bottom:20px">' +
+    var head = '<div class="hero" style="border-radius:0 0 26px 26px;padding-bottom:' + (list.length ? 20 : 40) + 'px">' +
       '<div class="blob b1"></div><div class="hero-top"><div>' +
       '<h1 class="hi">今日餐桌 🍽</h1><p class="sub">' + todayStr() + ' · 想吃什么点什么</p></div>' +
       '<button class="avatar press" data-act="clearOrders">🧹</button></div></div>';
@@ -890,7 +922,7 @@
 
   function drawMeal() {
     var list = aliveOrders().slice().sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-    var W = 640, PAD = 20, HEAD = 200, ROW = 78, FOOT = 200;
+    var W = 640, PAD = 20, HEAD = 184, ROW = 78, FOOT = 200;
     var paperW = W - PAD * 2;
     var paperH = HEAD + list.length * ROW + FOOT;
     var H = paperH + 56;
@@ -962,40 +994,26 @@
         ctx.stroke();
       }
 
-      // ---------- 店招 ----------
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = '#33241C';
-      ctx.font = '700 30px ' + SANS;
-      ctx.fillText('🍚 家的菜单', PX + 40, PY + 86);
+      // ---------- 右上：累计单号 + 日期 ----------
+      var d = new Date();
+      var mm = ('0' + (d.getMonth() + 1)).slice(-2), dd = ('0' + d.getDate()).slice(-2);
+      var hh = ('0' + d.getHours()).slice(-2), mi = ('0' + d.getMinutes()).slice(-2);
+      var noStr = ('0000' + (S.mealNo || 1)).slice(-4);
 
       ctx.textAlign = 'right';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = '#FF6B35';
+      ctx.font = '800 15px ' + SANS;
+      ctx.fillText('NO.' + noStr, PX + paperW - 40, PY + 56);
       ctx.fillStyle = '#B0A08F';
-      ctx.font = '500 13px ' + SANS;
-      var no = 'NO.' + ('0' + (new Date().getMonth() + 1)).slice(-2) + ('0' + new Date().getDate()).slice(-2);
-      ctx.fillText(no, PX + paperW - 40, PY + 62);
-      ctx.fillText('两个人 · 共 ' + totalQty + ' 份', PX + paperW - 40, PY + 84);
-      ctx.textAlign = 'left';
-
-      // 手绘横线
-      ctx.save();
-      var lineGrd = ctx.createLinearGradient(PX + 40, PY + 104, PX + paperW - 40, PY + 104);
-      lineGrd.addColorStop(0, '#FFB37A');
-      lineGrd.addColorStop(.6, '#FF6B35');
-      lineGrd.addColorStop(1, '#FF8C4A');
-      ctx.strokeStyle = lineGrd;
-      ctx.lineWidth = 5;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(PX + 42, PY + 105);
-      ctx.quadraticCurveTo(PX + paperW / 2, PY + 102, PX + paperW - 42, PY + 106);
-      ctx.stroke();
-      ctx.restore();
+      ctx.font = '400 13px ' + SANS;
+      ctx.fillText(d.getFullYear() + '.' + mm + '.' + dd + '  ' + hh + ':' + mi, PX + paperW - 40, PY + 78);
 
       // ---------- 标题 ----------
+      ctx.textAlign = 'left';
       ctx.fillStyle = '#2E211A';
       ctx.font = '800 34px ' + SANS;
-      ctx.fillText('今日点菜单', PX + 40, PY + 156);
+      ctx.fillText('今日点菜单', PX + 40, PY + 126);
 
       // 手绘下划线
       ctx.save();
@@ -1003,41 +1021,31 @@
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(PX + 42, PY + 168);
-      ctx.quadraticCurveTo(PX + 92, PY + 172, PX + 150, PY + 166);
-      ctx.quadraticCurveTo(PX + 178, PY + 163, PX + 196, PY + 169);
+      ctx.moveTo(PX + 42, PY + 140);
+      ctx.quadraticCurveTo(PX + 92, PY + 144, PX + 150, PY + 138);
+      ctx.quadraticCurveTo(PX + 178, PY + 135, PX + 196, PY + 141);
       ctx.stroke();
       ctx.restore();
-
-      // 日期
-      ctx.textAlign = 'right';
-      ctx.fillStyle = '#B0A08F';
-      ctx.font = '400 13px ' + SANS;
-      var d = new Date();
-      var mm = ('0' + (d.getMonth() + 1)).slice(-2), dd = ('0' + d.getDate()).slice(-2);
-      var hh = ('0' + d.getHours()).slice(-2), mi = ('0' + d.getMinutes()).slice(-2);
-      ctx.fillText(d.getFullYear() + '.' + mm + '.' + dd + '  ' + hh + ':' + mi, PX + paperW - 40, PY + 156);
-      ctx.textAlign = 'left';
 
       // ---------- 表头 ----------
       ctx.fillStyle = '#C0B1A1';
       ctx.font = '500 12px ' + SANS;
-      ctx.fillText('菜品', PX + 40, PY + 194);
+      ctx.fillText('菜品', PX + 40, PY + 180);
       ctx.textAlign = 'center';
-      ctx.fillText('谁点的', PX + paperW - 178, PY + 194);
+      ctx.fillText('谁点的', PX + paperW - 178, PY + 180);
       ctx.textAlign = 'right';
-      ctx.fillText('份数', PX + paperW - 40, PY + 194);
+      ctx.fillText('份数', PX + paperW - 40, PY + 180);
       ctx.textAlign = 'left';
 
       ctx.strokeStyle = '#EFE2D4';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(PX + 40, PY + 202);
-      ctx.lineTo(PX + paperW - 40, PY + 202);
+      ctx.moveTo(PX + 40, PY + 188);
+      ctx.lineTo(PX + paperW - 40, PY + 188);
       ctx.stroke();
 
       // ---------- 菜行 ----------
-      var top = PY + 206;
+      var top = PY + 192;
       list.forEach(function (o, i) {
         var cy = top + i * ROW;
         var c = CAT_MAP[o.category] || CAT_MAP.meat;
@@ -1180,7 +1188,7 @@
       ctx.textAlign = 'center';
       ctx.fillStyle = '#C2B2A1';
       ctx.font = '400 12px ' + SANS;
-      ctx.fillText('好好吃饭，慢慢生活 · 家的菜单', W / 2, PY + paperH - 40);
+      ctx.fillText('好好吃饭，慢慢生活', W / 2, PY + paperH - 40);
       ctx.textAlign = 'left';
 
       return cv.toDataURL('image/png');
@@ -1237,7 +1245,12 @@
     if (page === 'menu') S.route = { name: 'menu', param: '' };
     else if (page === 'table') S.route = { name: 'table', param: '' };
     else if (page === 'profile') S.route = { name: 'profile', param: '' };
-    else if (page === 'meal') S.route = { name: 'meal', param: '' };
+    else if (page === 'meal') {
+      S.route = { name: 'meal', param: '' };
+      var mn = parseInt(readJSON(K.mealNo, 0) || 0, 10) + 1;
+      writeJSON(K.mealNo, mn);
+      S.mealNo = mn;
+    }
     window.scrollTo(0, 0);
     render();
     if (page === 'meal') {
@@ -1615,6 +1628,11 @@
         if (t.closest('.sheet')) closeSheet();
         break;
       }
+      case 'quickMinus': {
+        ev.stopPropagation();
+        removeFromTable(id);
+        break;
+      }
       case 'cat': S.cat = t.getAttribute('data-cat'); render(); break;
       case 'random': closeSheet(); randomDish(); break;
       case 'setCat': captureForm(); S.editing.category = t.getAttribute('data-cat'); render(); break;
@@ -1697,6 +1715,15 @@
       case 'saveSyncCfg': saveSyncCfg(); break;
       case 'disableSync': disableSync(); break;
       case 'syncNow': toast('同步中…'); pull().then(function () { toast('已同步'); }); break;
+      case 'clearQ': {
+        S.q = '';
+        var qi = $('#qInput');
+        if (qi) { qi.value = ''; qi.focus(); }
+        var ml = $('#menuList');
+        if (ml) ml.innerHTML = menuListHtml();
+        syncClearBtn();
+        break;
+      }
       case 'exportText': exportText(); break;
     case 'importText': importText(); break;
     case 'doImportText': doImportText(); break;
@@ -1706,18 +1733,37 @@
     }
   });
 
-  // 输入
+  // 输入（搜索只局部刷新列表，避免中文输入法被整页重绘打断）
+  var composing = false;
+  function syncClearBtn() {
+    var box = $('#qClear');
+    if (!box) return;
+    box.innerHTML = S.q ? '<button class="sx press" data-act="clearQ" aria-label="清空搜索">✕</button>' : '';
+  }
+  function refreshMenuList() {
+    clearTimeout(S._qt);
+    S._qt = setTimeout(function () {
+      var wrap = $('#menuList');
+      if (wrap) wrap.innerHTML = menuListHtml();
+      syncClearBtn();
+    }, 120);
+  }
+  document.addEventListener('compositionstart', function (ev) {
+    if (ev.target && ev.target.id === 'qInput') composing = true;
+  });
+  document.addEventListener('compositionend', function (ev) {
+    if (ev.target && ev.target.id === 'qInput') {
+      composing = false;
+      S.q = ev.target.value;
+      refreshMenuList();
+    }
+  });
   document.addEventListener('input', function (ev) {
     var id = ev.target.id;
     if (id === 'qInput') {
       S.q = ev.target.value;
-      clearTimeout(S._qt);
-      S._qt = setTimeout(function () {
-        var val = S.q;
-        render();
-        var el = $('#qInput');
-        if (el) { el.value = val; el.focus(); }
-      }, 180);
+      if (composing) return;
+      refreshMenuList();
     } else if (id === 'pName') {
       S.profile.name = ev.target.value.trim() || '我';
       writeJSON(K.profile, S.profile);
