@@ -290,7 +290,7 @@
     });
     if (!changed) return false;
     var next = Object.keys(map).map(function (k) { return map[k]; });
-    if (table === 'dishes') { S.dishes = next; saveDishes(); }
+    if (table === 'dishes') { S.dishes = next; saveDishes(); markLegacySeeds(); }
     else if (table === 'members') {
       S.members = next;
       writeJSON(K.members, S.members);
