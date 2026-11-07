@@ -52,4 +52,24 @@ grant usage on schema public to anon, authenticated;
 grant all on public.dishes to anon, authenticated;
 grant all on public.orders to anon, authenticated;
 
+-- 家庭成员（谁在这个家里、叫什么、头像），用于「我的」页的成员列表
+create table if not exists public.members (
+  id         text primary key,
+  family_id  text not null default '',
+  name       text not null default '',
+  emoji      text not null default '🧑',
+  created_at bigint not null default 0,
+  updated_at bigint not null default 0,
+  deleted    boolean not null default false
+);
+create index if not exists members_family_updated on public.members (family_id, updated_at);
+
+alter table public.members enable row level security;
+
+drop policy if exists "family members access" on public.members;
+create policy "family members access" on public.members
+  for all to anon, authenticated using (true) with check (true);
+
+grant all on public.members to anon, authenticated;
+
 -- 完成。回到网页，把 Project URL 和 anon key 填进去即可。
