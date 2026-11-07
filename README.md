@@ -106,6 +106,24 @@ Netlify（拖文件夹）、Vercel、Cloudflare Pages、自己的服务器都行
 图片以 base64 存在数据库的 text 字段里（已压缩到 720px 宽、约 0.7 质量，一张 60~120KB）。
 家庭几十道菜的量级完全够用。
 
+### 关于 anon key 的公开性（重要）
+
+Supabase 的 `anon key` 设计上就是公开的，它靠数据库的 RLS 规则控制权限。
+本项目为了让家人**打开链接就自动连上**，支持把 key 写进 `config.js`：
+
+```js
+window.FAMILY_MENU_CONFIG = {
+  supabaseUrl: 'https://xxxx.supabase.co',
+  supabaseAnonKey: 'eyJhbGciOi...'
+};
+```
+
+方便，但要知道代价：**拿到网址和 key 的人，理论上能通过 API 读到整张表**（也就是所有家庭的数据，不只是你的）。
+
+- 介意的话：不要在 `config.js` 里写，改成每个人自己在页面里填（各自的 key 只存在自己浏览器里，别人拿不到）
+- 或者：定期到 Supabase → Settings → API 里轮换 key，同时更新 `config.js`
+- 对"就两个人用、网址不外传"的场景，风险很小，但不要把它当保险箱
+
 ---
 
 ## 七、和小程序版的关系
