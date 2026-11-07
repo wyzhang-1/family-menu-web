@@ -1,4 +1,4 @@
-// 家的菜单 · 配置
+// 咕噜咕噜研究院 · 配置
 // 填上 Supabase 的 Project URL 和 anon key，两台手机就能自动同步了。
 // 留空 = 只用本机，数据存在浏览器 localStorage 里。
 //
