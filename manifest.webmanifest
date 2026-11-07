@@ -1,7 +1,7 @@
 {
-  "name": "家的菜单",
-  "short_name": "家的菜单",
-  "description": "两个人的家庭菜谱，一起点菜、一起备菜",
+  "name": "咕噜咕噜研究院",
+  "short_name": "咕噜咕噜",
+  "description": "咕噜咕噜研究院 · 两个人的家庭菜谱，一起点菜、一起备菜",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
