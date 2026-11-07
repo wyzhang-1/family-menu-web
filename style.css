@@ -17,7 +17,10 @@ input,textarea,select{font:inherit;color:inherit;border:0;outline:0;background:n
 
 /* ---------- hero ---------- */
 .hero{position:relative;overflow:hidden;background:linear-gradient(160deg,#FFA45C 0%,#FF7A3D 45%,#FF5F2E 100%);
-  border-radius:0 0 28px 28px;padding:calc(18px + env(safe-area-inset-top,0px)) 20px 40px;color:#fff}
+  border-radius:0 0 28px 28px;padding:calc(14px + env(safe-area-inset-top,0px)) 20px 40px;color:#fff}
+.hero .brand{display:flex;align-items:center;gap:5px;margin:0 0 4px;font-size:11px;font-weight:700;
+  letter-spacing:2.2px;opacity:.88}
+.hero .brand::before{content:'';width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.8);flex:none}
 .hero .blob{position:absolute;border-radius:50%;background:rgba(255,255,255,.10);pointer-events:none}
 .hero .b1{width:220px;height:220px;right:-70px;top:-90px}
 .hero .b2{width:150px;height:150px;left:-60px;bottom:-70px;background:rgba(255,255,255,.07)}
