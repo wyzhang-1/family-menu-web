@@ -888,6 +888,11 @@
     if (!S.family || !S.family.id) return null;
     var now = Date.now();
     var rec = myMemberRecord();
+    // 被家里人移出后不要再自动复活，否则「移出」永远清不掉
+    if (rec && rec.deleted) {
+      if (push) toast('你已被移出这个家，想回来请让对方重新给你家庭码');
+      return null;
+    }
     if (!rec) {
       rec = { id: S.profile.id, name: S.profile.name, emoji: S.profile.emoji,
         createdAt: now, updatedAt: now, deleted: false };
@@ -906,6 +911,8 @@
   // 建家 / 换家：本地菜谱留着，进度清零后重新拉一遍再推
   function startFamily(code) {
     S.family = { id: code, name: '我们的小家', createdAt: Date.now() };
+    S.members = [];                 // 换家后成员列表以新家为准
+    writeJSON(K.members, S.members);
     writeJSON(K.family, S.family);
     writeCookie('fm_family', code);
     pinFamilyToUrl();
