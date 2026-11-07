@@ -309,7 +309,8 @@
     // 回溯 5 分钟，容忍两台设备时钟不一致；applyRemote 按 updated_at 比较，重复拉取是安全的
     var since = water > CLOCK_SKEW ? water - CLOCK_SKEW : 0;
     var hi = water;
-    if (!S.family || !S.family.id) return Promise.resolve();
+    // 没有家庭码时直接返回，但必须把 busy 复位，否则这一台设备之后的同步都会被永久吞掉
+    if (!S.family || !S.family.id) { SYNC.busy = false; return Promise.resolve(); }
     var fidRaw = S.family.id;
     var fid = encodeURIComponent(fidRaw);
     var tables = ['dishes', 'orders', 'members'];
