@@ -710,6 +710,10 @@
       }).join('') + '</div></div>' +
 
       '<div class="pcard"><h3>📦 数据</h3>' +
+      '<button class="linkrow press" data-act="exportText"><span class="li">💬</span>' +
+      '<span class="lb"><b>复制菜单，发微信</b><span>生成一段文字，粘给对方导入（不含图片）</span></span><span class="ar">›</span></button>' +
+      '<button class="linkrow press" data-act="importText"><span class="li">📋</span>' +
+      '<span class="lb"><b>粘贴对方的菜单</b><span>把对方发来的文字粘进来</span></span><span class="ar">›</span></button>' +
       '<button class="linkrow press" data-act="exportJSON"><span class="li">📤</span>' +
       '<span class="lb"><b>导出菜谱</b><span>下载一个 JSON 备份文件</span></span><span class="ar">›</span></button>' +
       '<button class="linkrow press" data-act="importJSON"><span class="li">📥</span>' +
@@ -1394,6 +1398,60 @@
     return o;
   }
 
+  function mergeIncoming(data) {
+    var inc = (data.dishes || []).map(normalizeDish);
+    var map = {};
+    S.dishes.forEach(function (d) { map[d.id] = d; });
+    var add = 0, upd = 0;
+    inc.forEach(function (d) {
+      var old = map[d.id] || S.dishes.filter(function (x) { return x.name === d.name && !x.deleted; })[0];
+      if (old) {
+        if ((d.updatedAt || 0) > (old.updatedAt || 0)) { Object.assign(old, d, { id: old.id }); upd++; }
+      } else { S.dishes.push(d); add++; }
+    });
+    saveDishes();
+    writeJSON(K.seeded, true);
+    pushRows('dishes', S.dishes);
+    toast('新增 ' + add + ' 道，更新 ' + upd + ' 道');
+    render();
+    return { add: add, upd: upd };
+  }
+
+  function exportText() {
+    var data = {
+      app: 'family-menu-web', version: 1, exportedAt: new Date().toISOString(),
+      family: S.family, profile: S.profile,
+      dishes: aliveDishes().map(function (d) {
+        var o = {};
+        Object.keys(d).forEach(function (k) { if (k !== 'image') o[k] = d[k]; });
+        return o;
+      })
+    };
+    copyText(JSON.stringify(data), '已复制，去微信粘给对方');
+  }
+
+  function importText() {
+    sheet('<div class="sh"><h2>📋 粘贴对方的菜单</h2><button class="close" data-act="closeSheet">✕</button></div>' +
+      '<div class="sb">' +
+      '<p class="ph2" style="margin:0 0 12px">把对方发来的那段以 { 开头的文字整个粘进来，同名菜品会自动按时间取新的。</p>' +
+      '<textarea id="impText" class="ta" rows="7" placeholder="粘贴到这里…"></textarea>' +
+      '<button class="btn-primary press" data-act="doImportText" style="margin:14px 0 6px">导入</button>' +
+      '</div>');
+  }
+
+  function doImportText() {
+    var el = $('#impText');
+    var v = (el && el.value || '').trim();
+    if (!v) { toast('还是空的'); return; }
+    try {
+      var data = JSON.parse(v);
+      closeSheet();
+      mergeIncoming(data);
+    } catch (e) {
+      toast('内容不完整，检查有没有粘全');
+    }
+  }
+
   function importJSON() {
     var input = document.createElement('input');
     input.type = 'file';
@@ -1404,22 +1462,7 @@
       var reader = new FileReader();
       reader.onload = function () {
         try {
-          var data = JSON.parse(reader.result);
-          var inc = (data.dishes || []).map(normalizeDish);
-          var map = {};
-          S.dishes.forEach(function (d) { map[d.id] = d; });
-          var add = 0, upd = 0;
-          inc.forEach(function (d) {
-            var old = map[d.id] || S.dishes.filter(function (x) { return x.name === d.name && !x.deleted; })[0];
-            if (old) {
-              if ((d.updatedAt || 0) > (old.updatedAt || 0)) { Object.assign(old, d, { id: old.id }); upd++; }
-            } else { S.dishes.push(d); add++; }
-          });
-          saveDishes();
-          writeJSON(K.seeded, true);
-          pushRows('dishes', S.dishes);
-          toast('新增 ' + add + ' 道，更新 ' + upd + ' 道');
-          render();
+          mergeIncoming(JSON.parse(reader.result));
         } catch (e) { toast('文件格式不对'); }
       };
       reader.readAsText(f);
@@ -1579,7 +1622,10 @@
       case 'saveSyncCfg': saveSyncCfg(); break;
       case 'disableSync': disableSync(); break;
       case 'syncNow': toast('同步中…'); pull().then(function () { toast('已同步'); }); break;
-      case 'exportJSON': exportJSON(); break;
+      case 'exportText': exportText(); break;
+    case 'importText': importText(); break;
+    case 'doImportText': doImportText(); break;
+    case 'exportJSON': exportJSON(); break;
       case 'importJSON': importJSON(); break;
       case 'clearAll': clearAll(); break;
     }
