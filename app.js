@@ -1,4 +1,4 @@
-/* 家的菜单 · 网页版
+/* 咕噜咕噜研究院 · 网页版
  * 纯前端，无框架。本地 localStorage 为主存储，Supabase 作为可选的两人同步通道。
  */
 (function () {
@@ -502,6 +502,7 @@
     return '<div class="hero">' +
       '<div class="blob b1"></div><div class="blob b2"></div>' +
       '<div class="hero-top"><div>' +
+      '<p class="brand">咕噜咕噜研究院</p>' +
       '<h1 class="hi">' + g[0] + ' <span>' + g[1] + '</span></h1>' +
       '<p class="sub">' + esc(S.family.name || '我们的小家') + ' · 今天想吃点什么？</p>' +
       '</div><button class="avatar press" data-act="go" data-page="profile">' + esc(S.profile.emoji) + '</button></div>' +
@@ -784,7 +785,7 @@
       '<span class="lb"><b>清空本机数据</b><span>只清这台设备，不影响其他人</span></span><span class="ar">›</span></button>' +
       '</div>' +
 
-      '<p style="text-align:center;font-size:11.5px;color:#C9B8A6;padding:10px 0 24px">家的菜单 · 两个人一起吃好每一顿</p>';
+      '<p style="text-align:center;font-size:11.5px;color:#C9B8A6;padding:10px 0 24px">咕噜咕噜研究院 · 两个人一起吃好每一顿</p>';
   }
 
   // 加入对方家庭（手动输码）
@@ -1457,7 +1458,7 @@
     var blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = '家的菜单-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.download = '咕噜咕噜研究院-' + new Date().toISOString().slice(0, 10) + '.json';
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 500);
@@ -1582,7 +1583,7 @@
     fetch(img.src).then(function (r) { return r.blob(); }).then(function (blob) {
       var file = new File([blob], '今日菜单.png', { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        return navigator.share({ files: [file], title: '今日菜单', text: '今天吃这些～' });
+        return navigator.share({ files: [file], title: '咕噜咕噜研究院 · 今日菜单', text: '咕噜咕噜研究院 · 今天吃这些～' });
       }
       toast('这个浏览器不支持分享，请长按保存');
     }).catch(function () { toast('分享失败，请长按保存'); });
