@@ -8,6 +8,9 @@
   // 配置
   // ============================================================
   var CFG = window.FAMILY_MENU_CONFIG || {};
+  // 两台设备的系统时间可能有偏差；增量拉取时多回溯一段时间，重复的行由 applyRemote 幂等忽略
+  var CLOCK_SKEW = 5 * 60 * 1000;
+
   var K = {
     dishes: 'fmw_dishes', orders: 'fmw_orders', profile: 'fmw_profile',
     family: 'fmw_family', sync: 'fmw_sync', checks: 'fmw_checks', seeded: 'fmw_seeded', mealNo: 'fmw_mealno'
@@ -218,7 +221,10 @@
   function pull() {
     if (!SYNC.on || SYNC.busy) return Promise.resolve();
     SYNC.busy = true;
-    var since = SYNC.lastPull || 0;
+    var water = SYNC.lastPull || 0;
+    // 回溯 5 分钟，容忍两台设备时钟不一致；applyRemote 按 updated_at 比较，重复拉取是安全的
+    var since = water > CLOCK_SKEW ? water - CLOCK_SKEW : 0;
+    var hi = water;
     var fidRaw = S.family.id;
     var fid = encodeURIComponent(fidRaw);
     var tables = ['dishes', 'orders'];
@@ -234,14 +240,14 @@
         }).then(function (rows) {
           if (!Array.isArray(rows) || !rows.length) return;
           if (applyRemote(t, rows)) changed = true;
-          rows.forEach(function (row) { if ((row.updated_at || 0) > since) { since = row.updated_at; } });
+          rows.forEach(function (row) { if ((row.updated_at || 0) > hi) { hi = row.updated_at; } });
         });
       });
     }, Promise.resolve()).then(function () {
       SYNC.busy = false;
       // 拉取途中换了家庭码：这次结果作废，按新家全量重来（否则老时间戳会把新家的旧数据过滤掉）
       if (S.family.id !== fidRaw) { setTimeout(pull, 200); return; }
-      SYNC.lastPull = since;
+      SYNC.lastPull = Math.max(water, hi);
       saveSync();
       markSync(true);
       if (changed) { render(); }
@@ -1715,7 +1721,12 @@
       case 'openSync': openSyncSheet(); break;
       case 'saveSyncCfg': saveSyncCfg(); break;
       case 'disableSync': disableSync(); break;
-      case 'syncNow': toast('同步中…'); pull().then(function () { toast('已同步'); }); break;
+      case 'syncNow':
+        toast('同步中…');
+        SYNC.lastPull = 0;
+        saveSync();
+        pullIdle().then(function () { toast('已同步'); });
+        break;
       case 'clearQ': {
         S.q = '';
         var qi = $('#qInput');
@@ -1794,9 +1805,13 @@
     render();
     if (SYNC.on) {
       if (!SYNC.lastPull) {
-        pushRows('dishes', S.dishes).then(function () {
+        // 先拉再推：云端已有的菜先按名字合并到本地（本地 id 会让位给云端 id），
+        // 这样推上去的只有真正新增的，不会在云端留下两套同名的示例菜
+        pull().then(function () {
+          return pushRows('dishes', S.dishes);
+        }).then(function () {
           return pushRows('orders', S.orders);
-        }).then(function () { setTimeout(pull, 400); });
+        });
       } else {
         pull();
       }
