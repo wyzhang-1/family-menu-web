@@ -306,6 +306,8 @@
     if (!SYNC.on || SYNC.busy) return Promise.resolve();
     SYNC.busy = true;
     var water = SYNC.lastPull || 0;
+    // 断网 / 切后台超过 90 秒，这次从零全量拉：增量只回溯 5 分钟，久别回来会漏掉改动
+    if (!SYNC.lastOk || Date.now() - SYNC.lastOk > 90000) water = 0;
     // 回溯 5 分钟，容忍两台设备时钟不一致；applyRemote 按 updated_at 比较，重复拉取是安全的
     var since = water > CLOCK_SKEW ? water - CLOCK_SKEW : 0;
     var hi = water;
